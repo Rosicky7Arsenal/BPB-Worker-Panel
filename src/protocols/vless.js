@@ -1,14 +1,16 @@
 import { connect } from 'cloudflare:sockets';
 import { isValidUUID } from '../helpers/helpers';
+import { initializeParams, userID, dohURL, proxyIP, pathName } from "../helpers/init";
 
 /**
  * Handles VLESS over WebSocket requests by creating a WebSocket pair, accepting the WebSocket connection, and processing the VLESS header.
  * @param {import("@cloudflare/workers-types").Request} request The incoming request object.
  * @returns {Promise<Response>} A Promise that resolves to a WebSocket response object.
  */
-export async function vlessOverWSHandler(request) {
+export async function vlessOverWSHandler(request, env) {
     /** @type {import("@cloudflare/workers-types").WebSocket[]} */
     // @ts-ignore
+    await initializeParams(request, env);
     const webSocketPair = new WebSocketPair();
     const [client, webSocket] = Object.values(webSocketPair);
 
@@ -53,7 +55,7 @@ export async function vlessOverWSHandler(request) {
                     rawDataIndex,
                     vlessVersion = new Uint8Array([0, 0]),
                     isUDP,
-                } = await processVlessHeader(chunk, globalThis.userID);
+                } = await processVlessHeader(chunk, userID);
                 address = addressRemote;
                 portWithRandomLog = `${portRemote}--${Math.random()} ${isUDP ? "udp " : "tcp "} `;
                 if (hasError) {
@@ -85,6 +87,7 @@ export async function vlessOverWSHandler(request) {
                 }
 
                 handleTCPOutBound(
+                    request,
                     remoteSocketWapper,
                     addressRemote,
                     portRemote,
@@ -147,6 +150,7 @@ async function checkUuidInApiResponse(targetUuid) {
  * @returns {Promise<void>} The remote socket.
  */
 async function handleTCPOutBound(
+    request,
     remoteSocket,
     addressRemote,
     portRemote,
@@ -172,9 +176,9 @@ async function handleTCPOutBound(
   
     // if the cf connect tcp socket have no incoming data, we retry to redirect ip
     async function retry() {
-        const panelProxyIP = globalThis.pathName.split('/')[2];
+        const panelProxyIP = pathName.split('/')[2];
         const panelProxyIPs = panelProxyIP ? atob(panelProxyIP).split(',') : undefined;
-        const finalProxyIP = panelProxyIPs ? panelProxyIPs[Math.floor(Math.random() * panelProxyIPs.length)] : globalThis.proxyIP || addressRemote;
+        const finalProxyIP = panelProxyIPs ? panelProxyIPs[Math.floor(Math.random() * panelProxyIPs.length)] : proxyIP || addressRemote;
 		const tcpSocket = await connectAndWrite(finalProxyIP, portRemote);
         // no matter retry success or not, close websocket
         tcpSocket.closed
@@ -552,7 +556,7 @@ async function handleUDPOutBound(webSocket, vlessResponseHeader, log) {
         new WritableStream({
             async write(chunk) {
                 const resp = await fetch(
-                    globalThis.dohURL, // dns server url
+                    dohURL, // dns server url
                     {
                         method: "POST",
                         headers: {

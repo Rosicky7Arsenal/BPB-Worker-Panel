@@ -1,5 +1,7 @@
 import { getConfigAddresses, extractWireguardParams, generateRemark, randomUpperCase, getRandomPath, isIPv6, isIPv4 } from './helpers';
+import { initializeParams, userID, trojanPassword, hostName, defaultHttpsPorts } from "../helpers/init";
 import { getDataset } from '../kv/handlers';
+import { renderErrorPage } from '../pages/error';
 import { isDomain } from '../helpers/helpers';
 
 async function buildClashDNS (proxySettings, isChain, isWarp) {
@@ -249,14 +251,14 @@ function buildClashRoutingRules (proxySettings) {
 }
 
 function buildClashVLESSOutbound (remark, address, port, host, sni, path, allowInsecure) {
-    const tls = globalThis.defaultHttpsPorts.includes(port) ? true : false;
+    const tls = defaultHttpsPorts.includes(port) ? true : false;
     const addr = isIPv6(address) ? address.replace(/\[|\]/g, '') : address;
     const outbound = {
         "name": remark,
         "type": "vless",
         "server": addr,
         "port": +port,
-        "uuid": globalThis.userID,
+        "uuid": userID,
         "tls": tls,
         "network": "ws",
         "udp": true,
@@ -287,7 +289,7 @@ function buildClashTrojanOutbound (remark, address, port, host, sni, path, allow
         "type": "trojan",
         "server": addr,
         "port": +port,
-        "password": globalThis.trojanPassword,
+        "password": trojanPassword,
         "network": "ws",
         "udp": true,
         "ws-opts": {
@@ -413,7 +415,8 @@ function buildClashChainOutbound(chainProxyParams) {
 }
 
 export async function getClashWarpConfig(request, env) {
-    const { proxySettings, warpConfigs } = await getDataset(request, env);
+    const { kvNotFound, proxySettings, warpConfigs } = await getDataset(request, env);
+    if (kvNotFound) return await renderErrorPage(request, env, 'KV Dataset is not properly set!', null, true);
     const { warpEndpoints } = proxySettings;
     const config = structuredClone(clashConfigTemp);
     config.dns = await buildClashDNS(proxySettings, true, true);
@@ -454,7 +457,9 @@ export async function getClashWarpConfig(request, env) {
 }
 
 export async function getClashNormalConfig (request, env) {
-    const { proxySettings } = await getDataset(request, env);
+    await initializeParams(request, env);
+    const { kvNotFound, proxySettings } = await getDataset(request, env);
+    if (kvNotFound) return await renderErrorPage(request, env, 'KV Dataset is not properly set!', null, true);
     let chainProxy;
     const { 
         resolvedRemoteDNS,
@@ -504,7 +509,7 @@ export async function getClashNormalConfig (request, env) {
     selector.proxies = ['💦 Best Ping 💥'];
     urlTest.name = '💦 Best Ping 💥';
     urlTest.interval = +bestVLESSTrojanInterval;
-    const Addresses = await getConfigAddresses(cleanIPs, enableIPv6);
+    const Addresses = await getConfigAddresses(hostName, cleanIPs, enableIPv6);
     const customCdnAddresses = customCdnAddrs ? customCdnAddrs.split(',') : [];
     const totalAddresses = [...Addresses, ...customCdnAddresses];
     let proxyIndex = 1, path;
@@ -520,8 +525,8 @@ export async function getClashNormalConfig (request, env) {
                 let VLESSOutbound, TrojanOutbound;
                 const isCustomAddr = customCdnAddresses.includes(addr);
                 const configType = isCustomAddr ? 'C' : '';
-                const sni = isCustomAddr ? customCdnSni : randomUpperCase(globalThis.hostName);
-                const host = isCustomAddr ? customCdnHost : globalThis.hostName;
+                const sni = isCustomAddr ? customCdnSni : randomUpperCase(hostName);
+                const host = isCustomAddr ? customCdnHost : hostName;
                 const remark = generateRemark(protocolIndex, port, addr, cleanIPs, protocol, configType).replace(' : ', ' - ');
 
                 if (protocol === 'VLESS') {
@@ -540,7 +545,7 @@ export async function getClashNormalConfig (request, env) {
                     urlTest.proxies.push(remark);
                 }
                 
-                if (protocol === 'Trojan' && globalThis.defaultHttpsPorts.includes(port)) {
+                if (protocol === 'Trojan' && defaultHttpsPorts.includes(port)) {
                     path = `/tr${getRandomPath(16)}${proxyIP ? `/${btoa(proxyIP)}` : ''}`;
                     TrojanOutbound = buildClashTrojanOutbound(
                         chainProxy ? `proxy-${proxyIndex}` : remark, 

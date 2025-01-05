@@ -1,6 +1,8 @@
 import { resolveDNS, isDomain } from '../helpers/helpers';
 import { getConfigAddresses, extractWireguardParams, base64ToDecimal, generateRemark, randomUpperCase, getRandomPath } from './helpers';
+import { initializeParams, userID, trojanPassword, hostName, defaultHttpsPorts } from "../helpers/init";
 import { getDataset } from '../kv/handlers';
+import { renderErrorPage } from '../pages/error';
 
 async function buildXrayDNS (proxySettings, outboundAddrs, domainToStaticIPs, isWorkerLess, isWarp) { 
     const { 
@@ -284,7 +286,7 @@ function buildXrayVLESSOutbound (tag, address, port, host, sni, proxyIP, isFragm
                     port: +port,
                     users: [
                         {
-                            id: globalThis.userID,
+                            id: userID,
                             encryption: "none",
                             level: 8
                         }
@@ -307,7 +309,7 @@ function buildXrayVLESSOutbound (tag, address, port, host, sni, proxyIP, isFragm
         tag: tag
     };
 
-    if (globalThis.defaultHttpsPorts.includes(port)) {
+    if (defaultHttpsPorts.includes(port)) {
         outbound.streamSettings.security = "tls";
         outbound.streamSettings.tlsSettings = {
             allowInsecure: allowInsecure,
@@ -337,7 +339,7 @@ function buildXrayTrojanOutbound (tag, address, port, host, sni, proxyIP, isFrag
                 {
                     address: address,
                     port: +port,
-                    password: globalThis.trojanPassword,
+                    password: trojanPassword,
                     level: 8
                 }
             ]
@@ -356,7 +358,7 @@ function buildXrayTrojanOutbound (tag, address, port, host, sni, proxyIP, isFrag
         tag: tag
     };
 
-    if (globalThis.defaultHttpsPorts.includes(port)) {
+    if (defaultHttpsPorts.includes(port)) {
         outbound.streamSettings.security = "tls";
         outbound.streamSettings.tlsSettings = {
             allowInsecure: allowInsecure,
@@ -695,7 +697,7 @@ async function buildXrayWorkerLessConfig(proxySettings) {
     const config = buildXrayConfig(proxySettings, '💦 BPB F - WorkerLess ⭐', true, false, false, false, false);
     config.dns = await buildXrayDNS(proxySettings, [], undefined, true);
     config.routing.rules = buildXrayRoutingRules(proxySettings, [], false, false, true, false);
-    const fakeOutbound = buildXrayVLESSOutbound('fake-outbound', 'google.com', '443', globalThis.userID, 'google.com', 'google.com', '', true, false);
+    const fakeOutbound = buildXrayVLESSOutbound('fake-outbound', 'google.com', '443', userID, 'google.com', 'google.com', '', true, false);
     delete fakeOutbound.streamSettings.sockopt;
     fakeOutbound.streamSettings.wsSettings.path = '/';
     config.outbounds.push(fakeOutbound);
@@ -703,7 +705,9 @@ async function buildXrayWorkerLessConfig(proxySettings) {
 }
 
 export async function getXrayCustomConfigs(request, env, isFragment) {
-    const { proxySettings } = await getDataset(request, env);
+    await initializeParams(request, env);
+    const { kvNotFound, proxySettings } = await getDataset(request, env);
+    if (kvNotFound) return await renderErrorPage(request, env, 'KV Dataset is not properly set!', null, true);
     let configs = [];
     let outbounds = [];
     let protocols = [];
@@ -737,10 +741,10 @@ export async function getXrayCustomConfigs(request, env, isFragment) {
         }
     }
     
-    const Addresses = await getConfigAddresses(cleanIPs, enableIPv6);
+    const Addresses = await getConfigAddresses(hostName, cleanIPs, enableIPv6);
     const customCdnAddresses = customCdnAddrs ? customCdnAddrs.split(',') : [];
     const totalAddresses = isFragment ? [...Addresses] : [...Addresses, ...customCdnAddresses];
-    const totalPorts = ports.filter(port => isFragment ? globalThis.defaultHttpsPorts.includes(port): true);
+    const totalPorts = ports.filter(port => isFragment ? defaultHttpsPorts.includes(port): true);
     vlessConfigs && protocols.push('VLESS');
     trojanConfigs && protocols.push('Trojan');
     let proxyIndex = 1;
@@ -751,8 +755,8 @@ export async function getXrayCustomConfigs(request, env, isFragment) {
             for (const addr of totalAddresses) {
                 const isCustomAddr = customCdnAddresses.includes(addr);
                 const configType = isCustomAddr ? 'C' : isFragment ? 'F' : '';
-                const sni = isCustomAddr ? customCdnSni : randomUpperCase(globalThis.hostName);
-                const host = isCustomAddr ? customCdnHost : globalThis.hostName;
+                const sni = isCustomAddr ? customCdnSni : randomUpperCase(hostName);
+                const host = isCustomAddr ? customCdnHost : hostName;
                 const remark = generateRemark(protocolIndex, port, addr, cleanIPs, protocol, configType);
                 const customConfig = buildXrayConfig(proxySettings, remark, isFragment, false, chainProxy, false, false);
                 customConfig.dns = await buildXrayDNS(proxySettings, [addr], undefined);
@@ -783,7 +787,7 @@ export async function getXrayCustomConfigs(request, env, isFragment) {
     const bestPing = await buildXrayBestPingConfig(proxySettings, totalAddresses, chainProxy, outbounds, isFragment);
     const finalConfigs = [...configs, bestPing];
     if (isFragment) {
-        const bestFragment = await buildXrayBestFragmentConfig(proxySettings, globalThis.hostName, chainProxy, outbounds);
+        const bestFragment = await buildXrayBestFragmentConfig(proxySettings, hostName, chainProxy, outbounds);
         const workerLessConfig = await buildXrayWorkerLessConfig(proxySettings); 
         finalConfigs.push(bestFragment, workerLessConfig);
     }
@@ -798,7 +802,8 @@ export async function getXrayCustomConfigs(request, env, isFragment) {
 }
 
 export async function getXrayWarpConfigs (request, env, client) {
-    const { proxySettings, warpConfigs } = await getDataset(request, env);
+    const { kvNotFound, proxySettings, warpConfigs } = await getDataset(request, env);
+    if (kvNotFound) return await renderErrorPage(request, env, 'KV Dataset is not properly set!', null, true);
     const xrayWarpConfigs = [];
     const xrayWoWConfigs = [];
     const xrayWarpOutbounds = [];

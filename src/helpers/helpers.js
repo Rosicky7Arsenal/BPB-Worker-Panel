@@ -1,6 +1,8 @@
 import { Authenticate } from "../authentication/auth";
 import { getDataset, updateDataset } from "../kv/handlers";
+import { renderErrorPage } from "../pages/error";
 import { renderHomePage } from "../pages/home";
+import { initializeParams, origin } from "./init";
 
 export function isValidUUID(uuid) {
 	const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[4][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -41,6 +43,7 @@ export function isDomain(address) {
 }
 
 export async function handlePanel(request, env) {
+    await initializeParams(request, env);
     const auth = await Authenticate(request, env); 
     if (request.method === 'POST') {     
         if (!auth) return new Response('Unauthorized or expired session!', { status: 401 });             
@@ -48,16 +51,17 @@ export async function handlePanel(request, env) {
         return new Response('Success', { status: 200 });
     }
         
-    const { proxySettings } = await getDataset(request, env);
+    const { kvNotFound, proxySettings } = await getDataset(request, env);
+    if (kvNotFound) return await renderErrorPage(request, env, 'KV Dataset is not properly set!', null, true);
     const pwd = await env.bpb.get('pwd');
-    if (pwd && !auth) return Response.redirect(`${globalThis.urlOrigin}/login`, 302);
+    if (pwd && !auth) return Response.redirect(`${origin}/login`, 302);
     const isPassSet = pwd?.length >= 8;
-    return await renderHomePage(proxySettings, isPassSet);
+    return await renderHomePage(request, env, proxySettings, isPassSet);
 }
 
 export async function fallback(request) {
     const url = new URL(request.url);
-    url.hostname = 'speed.cloudflare.com';
+    url.hostname = 'www.speedtest.net';
     url.protocol = 'https:';
     request = new Request(url, request);
     return await fetch(request);

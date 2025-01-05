@@ -1,9 +1,15 @@
 import { fetchWarpConfigs } from '../protocols/warp';
 import { isDomain, resolveDNS } from '../helpers/helpers';
+import { initializeParams, panelVersion } from '../helpers/init';
 import { Authenticate } from '../authentication/auth';
+import { renderErrorPage } from '../pages/error';
 
 export async function getDataset(request, env) {
+    await initializeParams(request, env);
     let proxySettings, warpConfigs;
+    if (typeof env.bpb !== 'object') {
+        return {kvNotFound: true, proxySettings: null, warpConfigs: null}
+    }
 
     try {
         proxySettings = await env.bpb.get("proxySettings", {type: 'json'});
@@ -20,11 +26,12 @@ export async function getDataset(request, env) {
         warpConfigs = configs;
     }
     
-    if (globalThis.panelVersion !== proxySettings.panelVersion) proxySettings = await updateDataset(request, env);
-    return { proxySettings, warpConfigs }
+    if (panelVersion !== proxySettings.panelVersion) proxySettings = await updateDataset(request, env);
+    return {kvNotFound: false, proxySettings, warpConfigs}
 }
 
 export async function updateDataset (request, env) {
+    await initializeParams(request, env);
     let newSettings = request.method === 'POST' ? await request.formData() : null;
     const isReset = newSettings?.get('resetSettings') === 'true';
     let currentSettings;
@@ -36,6 +43,7 @@ export async function updateDataset (request, env) {
             throw new Error(`An error occurred while getting current KV settings - ${error}`);
         }
     } else {
+        await env.bpb.delete('warpConfigs');
         newSettings = null;
     }
 
@@ -110,12 +118,11 @@ export async function updateDataset (request, env) {
         noiseSizeMax: validateField('noiseSizeMax') ?? currentSettings?.noiseSizeMax ?? '10',
         noiseDelayMin: validateField('noiseDelayMin') ?? currentSettings?.noiseDelayMin ?? '1',
         noiseDelayMax: validateField('noiseDelayMax') ?? currentSettings?.noiseDelayMax ?? '1',
-        panelVersion: globalThis.panelVersion
+        panelVersion: panelVersion
     };
 
     try {    
-        await env.bpb.put("proxySettings", JSON.stringify(proxySettings));
-        if (isReset) await updateWarpConfigs(request, env);          
+        await env.bpb.put("proxySettings", JSON.stringify(proxySettings));          
     } catch (error) {
         console.log(error);
         throw new Error(`An error occurred while updating KV - ${error}`);
@@ -159,7 +166,8 @@ export async function updateWarpConfigs(request, env) {
     if (!auth) return new Response('Unauthorized', { status: 401 });
     if (request.method === 'POST') {
         try {
-            const { proxySettings } = await getDataset(request, env);
+            const { kvNotFound, proxySettings } = await getDataset(request, env);
+            if (kvNotFound) return await renderErrorPage(request, env, 'KV Dataset is not properly set!', null, true);
             const { error: warpPlusError } = await fetchWarpConfigs(env, proxySettings);
             if (warpPlusError) return new Response(warpPlusError, { status: 400 });
             return new Response('Warp configs updated successfully', { status: 200 });

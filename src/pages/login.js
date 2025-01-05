@@ -1,4 +1,7 @@
-export async function renderLoginPage () {
+import { initializeParams, origin, panelVersion } from "../helpers/init";
+
+export async function renderLoginPage (request, env) {
+    await initializeParams(request, env);
     const loginPage = `
     <!DOCTYPE html>
     <html lang="en">
@@ -101,7 +104,7 @@ export async function renderLoginPage () {
     </head>
     <body>
         <div class="container">
-            <h1>BPB Panel <span style="font-size: smaller;">${globalThis.panelVersion}</span> 💦</h1>
+            <h1>BPB Panel <span style="font-size: smaller;">${panelVersion}</span> 💦</h1>
             <div class="form-container">
                 <h2>User Login</h2>
                 <form id="loginForm">
@@ -148,7 +151,7 @@ export async function renderLoginPage () {
         status: 200,
         headers: {
             'Content-Type': 'text/html;charset=utf-8',
-            'Access-Control-Allow-Origin': globalThis.urlOrigin,
+            'Access-Control-Allow-Origin': origin,
             'Access-Control-Allow-Methods': 'GET, POST',
             'Access-Control-Allow-Headers': 'Content-Type, Authorization',
             'X-Content-Type-Options': 'nosniff',

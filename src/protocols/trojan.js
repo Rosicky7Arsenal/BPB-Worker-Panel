@@ -1,7 +1,9 @@
 import { connect } from 'cloudflare:sockets';
 import sha256 from 'js-sha256';
+import { initializeParams, trojanPassword, proxyIP, pathName } from "../helpers/init";
 
-export async function trojanOverWSHandler(request) {
+export async function trojanOverWSHandler(request, env) {
+    await initializeParams(request, env);
     const webSocketPair = new WebSocketPair();
     const [client, webSocket] = Object.values(webSocketPair);
     webSocket.accept();
@@ -48,7 +50,7 @@ export async function trojanOverWSHandler(request) {
                         return;
                     }
 
-                    handleTCPOutBound(remoteSocketWapper, addressRemote, portRemote, rawClientData, webSocket, log);
+                    handleTCPOutBound(request, remoteSocketWapper, addressRemote, portRemote, rawClientData, webSocket, log);
                 },
                 close() {
                     log(`readableWebSocketStream is closed`);
@@ -86,7 +88,7 @@ async function parseTrojanHeader(buffer) {
     }
 
     const password = new TextDecoder().decode(buffer.slice(0, crLfIndex));
-    if (password !== sha256.sha224(globalThis.trojanPassword)) {
+    if (password !== sha256.sha224(trojanPassword)) {
         return {
             hasError: true,
             message: "invalid password",
@@ -173,6 +175,7 @@ async function parseTrojanHeader(buffer) {
  * @returns {Promise<void>} The remote socket.
  */
 async function handleTCPOutBound(
+    request,
     remoteSocket,
     addressRemote,
     portRemote,
@@ -197,9 +200,9 @@ async function handleTCPOutBound(
   
     // if the cf connect tcp socket have no incoming data, we retry to redirect ip
     async function retry() {
-        const panelProxyIP = globalThis.pathName.split('/')[2];
+        const panelProxyIP = pathName.split('/')[2];
         const panelProxyIPs = panelProxyIP ? atob(panelProxyIP).split(',') : undefined;
-        const finalProxyIP = panelProxyIPs ? panelProxyIPs[Math.floor(Math.random() * panelProxyIPs.length)] : globalThis.proxyIP || addressRemote;
+        const finalProxyIP = panelProxyIPs ? panelProxyIPs[Math.floor(Math.random() * panelProxyIPs.length)] : proxyIP || addressRemote;
 		const tcpSocket = await connectAndWrite(finalProxyIP, portRemote);
         // no matter retry success or not, close websocket
         tcpSocket.closed
